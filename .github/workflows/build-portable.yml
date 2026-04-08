@@ -2,14 +2,18 @@ name: Build Portable Example
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to publish, for example v0.1.0
+        required: true
+        type: string
   push:
-    branches:
-      - main
-      - master
+    tags:
+      - "v*"
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-windows:
@@ -95,11 +99,17 @@ jobs:
           $out = Join-Path "target" "$env:PORTABLE_NAME-portable"
           $exeSource = Join-Path "target\release\examples" "$env:CARGO_EXAMPLE.exe"
           $exeTarget = Join-Path $out "$env:PORTABLE_NAME.exe"
+          $zipPath = Join-Path "target" "$env:PORTABLE_NAME-portable.zip"
 
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Copy-Item $exeSource $exeTarget -Force
           Copy-Item "inputs" $out -Recurse -Force
           Copy-Item "models" $out -Recurse -Force
+
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+          Compress-Archive -Path "$out\\*" -DestinationPath $zipPath
 
       - name: Upload portable artifact
         uses: actions/upload-artifact@v4
@@ -107,3 +117,42 @@ jobs:
           name: benchmark_cpu_vulkan-portable
           path: target/benchmark_cpu_vulkan-portable
           if-no-files-found: error
+
+      - name: Resolve release metadata
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "push") {
+            $tag = "${{ github.ref_name }}"
+          } else {
+            $tag = "${{ github.event.inputs.release_tag }}"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw "release tag is empty"
+          }
+
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          "RELEASE_NAME=$tag" >> $env:GITHUB_ENV
+
+      - name: Publish asset to GitHub Release
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          $name = $env:RELEASE_NAME
+          $asset = Join-Path "target" "$env:PORTABLE_NAME-portable.zip"
+
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag $asset `
+              --repo $env:GITHUB_REPOSITORY `
+              --title $name `
+              --notes "Automated build for $tag"
+          } else {
+            gh release upload $tag $asset `
+              --repo $env:GITHUB_REPOSITORY `
+              --clobber
+          }
