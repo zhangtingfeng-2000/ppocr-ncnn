@@ -41,8 +41,25 @@ jobs:
           }
           Expand-Archive -Path $zip -DestinationPath $dest -Force
 
-          "NCNN_INCLUDE_DIR=$dest\x64\include\ncnn" >> $env:GITHUB_ENV
-          "NCNN_LIB_DIR=$dest\x64\lib" >> $env:GITHUB_ENV
+          $cApi = Get-ChildItem -Path $dest -Recurse -Filter "c_api.h" |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]include[\\/]ncnn[\\/]c_api\.h$' } |
+            Select-Object -First 1
+          if (-not $cApi) {
+            throw "failed to locate x64/include/ncnn/c_api.h in extracted ncnn package"
+          }
+
+          $ncnnLib = Get-ChildItem -Path $dest -Recurse -Filter "ncnn.lib" |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]lib[\\/]ncnn\.lib$' } |
+            Select-Object -First 1
+          if (-not $ncnnLib) {
+            throw "failed to locate x64/lib/ncnn.lib in extracted ncnn package"
+          }
+
+          $includeDir = $cApi.Directory.FullName
+          $libDir = $ncnnLib.Directory.FullName
+
+          "NCNN_INCLUDE_DIR=$includeDir" >> $env:GITHUB_ENV
+          "NCNN_LIB_DIR=$libDir" >> $env:GITHUB_ENV
 
       - name: Configure LLVM for bindgen
         shell: pwsh
