@@ -1,0 +1,92 @@
+name: Build Portable Example
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_EXAMPLE: all
+      PORTABLE_NAME: benchmark_cpu_vulkan
+      LLVM_BIN: C:\Program Files\LLVM\bin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download ncnn prebuilt package
+        shell: pwsh
+        run: |
+          $url = "https://github.com/Tencent/ncnn/releases/download/20260113/ncnn-20260113-windows-vs2022.zip"
+          $zip = Join-Path $env:RUNNER_TEMP "ncnn-20260113-windows-vs2022.zip"
+          $dest = Join-Path $env:RUNNER_TEMP "ncnn"
+
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          if (Test-Path $dest) {
+            Remove-Item $dest -Recurse -Force
+          }
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+
+          "NCNN_INCLUDE_DIR=$dest\x64\include\ncnn" >> $env:GITHUB_ENV
+          "NCNN_LIB_DIR=$dest\x64\lib" >> $env:GITHUB_ENV
+
+      - name: Configure LLVM for bindgen
+        shell: pwsh
+        run: |
+          "LIBCLANG_PATH=$env:LLVM_BIN" >> $env:GITHUB_ENV
+          "$env:LLVM_BIN" >> $env:GITHUB_PATH
+
+      - name: Verify toolchain paths
+        shell: pwsh
+        run: |
+          Write-Host "NCNN_INCLUDE_DIR=$env:NCNN_INCLUDE_DIR"
+          Write-Host "NCNN_LIB_DIR=$env:NCNN_LIB_DIR"
+          Write-Host "LIBCLANG_PATH=$env:LIBCLANG_PATH"
+
+          if (!(Test-Path (Join-Path $env:NCNN_INCLUDE_DIR "c_api.h"))) {
+            throw "c_api.h not found under NCNN_INCLUDE_DIR"
+          }
+          if (!(Test-Path (Join-Path $env:NCNN_INCLUDE_DIR "gpu.h"))) {
+            throw "gpu.h not found under NCNN_INCLUDE_DIR"
+          }
+          if (!(Test-Path (Join-Path $env:NCNN_LIB_DIR "ncnn.lib"))) {
+            throw "ncnn.lib not found under NCNN_LIB_DIR"
+          }
+          if (!(Test-Path (Join-Path $env:NCNN_LIB_DIR "glslang.lib"))) {
+            throw "glslang.lib not found under NCNN_LIB_DIR"
+          }
+
+      - name: Build release package
+        shell: pwsh
+        run: |
+          cargo build -p ppocr-ncnn --release --example $env:CARGO_EXAMPLE
+
+          $out = Join-Path "target" "$env:PORTABLE_NAME-portable"
+          $exeSource = Join-Path "target\release\examples" "$env:CARGO_EXAMPLE.exe"
+          $exeTarget = Join-Path $out "$env:PORTABLE_NAME.exe"
+
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item $exeSource $exeTarget -Force
+          Copy-Item "inputs" $out -Recurse -Force
+          Copy-Item "models" $out -Recurse -Force
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark_cpu_vulkan-portable
+          path: target/benchmark_cpu_vulkan-portable
+          if-no-files-found: error

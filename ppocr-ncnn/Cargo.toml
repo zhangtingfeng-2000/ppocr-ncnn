@@ -1,0 +1,30 @@
+[package]
+name = "ppocr-ncnn"
+version = "0.1.0"
+edition = "2024"
+authors = ["Splay <2229596898@qq.com>"]
+license = "MIT"
+description = "使用ncnn推理paddle-ocr"
+
+[features]
+cpu = ["ncnnrs/cpu"]
+
+[dependencies]
+ncnnrs = { workspace = true }
+anyhow = { workspace = true }
+image = { workspace = true }
+nalgebra = "0.34"
+rayon = "1.11"
+
+[[example]]
+name = "cpu-only"
+path = "examples/benchmark_cpu.rs"
+required-features = ["cpu"]
+
+[[example]]
+name = "vulkan-only"
+path = "examples/benchmark_vulkan.rs"
+
+[[example]]
+name = "all"
+path = "examples/benchmark_cpu_vulkan.rs"
